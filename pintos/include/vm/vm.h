@@ -2,6 +2,7 @@
 #define VM_VM_H
 #include <stdbool.h>
 
+#include "lib/kernel/hash.h"  // 해시테이블
 #include "threads/palloc.h"
 
 enum vm_type {
@@ -43,8 +44,9 @@ struct thread;
  * DO NOT REMOVE/MODIFY PREDEFINED MEMBER OF THIS STRUCTURE. */
 struct page {
   const struct page_operations *operations;
-  void *va;            /* Address in terms of user space */
-  struct frame *frame; /* Back reference for frame */
+  void *va;                   /* Address in terms of user space */
+  struct frame *frame;        /* Back reference for frame */
+  struct hash_elem spt_elem;  // SPT 키
 
   /* Your implementation */
   bool writable;  // 읽기 전용 혹은 읽기/쓰기 가능을 저장하기 위해 추가
