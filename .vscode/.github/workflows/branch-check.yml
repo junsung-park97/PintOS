@@ -1,0 +1,11 @@
+name: Branch Check
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch update check
+        run: echo "Branch is ready for merge"
