@@ -60,14 +60,47 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   ASSERT(VM_TYPE(type) != VM_UNINIT)
 
   struct supplemental_page_table *spt = &thread_current()->spt;
+  // 현재 스레드의 spt에 대한 포인터를 얻는다.
 
   /* Check wheter the upage is already occupied or not. */
+  upage = pg_round_down(upage);
   if (spt_find_page(spt, upage) == NULL) {
-    /* TODO: Create the page, fetch the initialier according to the VM type,
-     * TODO: and then create "uninit" page struct by calling uninit_new. You
-     * TODO: should modify the field after calling the uninit_new. */
+    // upage가 이미 사용 중인지 확인한다.
 
-    /* TODO: Insert the page into the spt. */
+    struct page *page = malloc(sizeof(struct page));
+    // 새로운 페이지 구조체를 동적으로 할당
+    if (page == NULL) {
+      goto err;
+    }
+
+    page->writable = writable;
+    page->frame = NULL;
+
+    bool (*initializer)(struct page *, enum vm_type, void *);
+    // 가상 메모리 타입에 따라 초기화되는 함수 포인터를 설정
+    switch (VM_TYPE(type)) {
+      case VM_ANON:
+        initializer = anon_initializer;
+        break;
+
+      case VM_FILE:
+        initializer = file_backed_initializer;
+        break;
+
+      default:
+        free(page);
+        goto err;
+    }
+
+    uninit_new(page, upage, init, type, aux, initializer);
+    // uninit_new 함수를 사용하여 페이지를 초기화한다.
+
+    if (!spt_insert_page(spt, page)) {
+      // 페이지를 보조 페이지 테이블에 삽입한다.
+      free(page);
+      goto err;
+    }
+    return true;
   }
 err:
   return false;
