@@ -3,6 +3,7 @@
 #include "vm/vm.h"
 
 #include "threads/malloc.h"
+#include "threads/mmu.h"
 #include "vm/inspect.h"
 
 /* 해시 테이블 */
@@ -153,8 +154,9 @@ void vm_dealloc_page(struct page *page) {
 /* Claim the page that allocate on VA. */
 bool vm_claim_page(void *va UNUSED) {
   struct page *page = NULL;
-  /* TODO: Fill this function */
-
+  va = pg_round_down(va);
+  page = spt_find_page(&thread_current()->spt, va);
+  if (!page) return false;
   return vm_do_claim_page(page);
 }
 
