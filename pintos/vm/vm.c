@@ -3,6 +3,7 @@
 #include "vm/vm.h"
 
 #include "threads/malloc.h"
+#include "threads/mmu.h"
 #include "vm/inspect.h"
 
 /* 해시 테이블 */
@@ -166,9 +167,17 @@ void vm_dealloc_page(struct page *page) {
 /* Claim the page that allocate on VA. */
 bool vm_claim_page(void *va UNUSED) {
   struct page *page = NULL;
-  /* TODO: Fill this function */
-
+  va = pg_round_down(va);
+  page = spt_find_page(&thread_current()->spt, va);
+  if (!page) return false;
   return vm_do_claim_page(page);
+}
+
+void vm_free_frame(struct frame *frame) {
+  ASSERT(frame != NULL);
+  ASSERT(frame->page == NULL);
+  palloc_free_page(frame->kva);
+  free(frame);
 }
 
 /* Claim the PAGE and set up the mmu. */
@@ -180,12 +189,28 @@ static bool vm_do_claim_page(struct page *page) {
   page->frame = frame;
 
   /* TODO: Insert page table entry to map page's VA to frame's PA. */
+  struct thread *cur = thread_current();
+  if (!pml4_set_page(cur->pml4, page->va, frame->kva, page->writable)) {
+    frame->page = NULL;
+    page->frame = NULL;
+    vm_free_frame(frame);
+    return false;
+  }
 
-  return swap_in(page, frame->kva);
+  if (!swap_in(page, frame->kva)) {
+    pml4_clear_page(cur->pml4, page->va);
+    frame->page = NULL;
+    page->frame = NULL;
+    vm_free_frame(frame);
+    return false;
+  }
+  return true;
 }
 
 /* Initialize new supplemental page table */
-void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {}
+void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
+  hash_init(&spt->h, spt_hash, spt_less, NULL);
+}
 
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
