@@ -5,13 +5,13 @@
 #include "vm/vm.h"
 
 /* DO NOT MODIFY BELOW LINE */
-static struct disk *swap_disk;
 static bool anon_swap_in(struct page *page, void *kva);
 static bool anon_swap_out(struct page *page);
 static void anon_destroy(struct page *page);
 
-static struct disk *swap_disk;
+// 전역 변수
 static struct bitmap *swap_table;
+static struct disk *swap_disk;
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations anon_ops = {
@@ -24,7 +24,7 @@ static const struct page_operations anon_ops = {
 /* 익명 페이지를 위한 데이터를 초기화 합니다. */
 void vm_anon_init(void) {
   /* swap_disk를 설정하세요 */
-  disk_sector_t swap_disk = disk_get(1, 1);
+  swap_disk = disk_get(1, 1);
   if (swap_disk == NULL) {
     return;
   }
@@ -33,7 +33,7 @@ void vm_anon_init(void) {
   size_t swap_slot_size = PGSIZE / DISK_SECTOR_SIZE;
   size_t slot_count = swap_dsize / swap_slot_size;
 
-  struct bitmap *swap_table = bitmap_create(slot_count);
+  swap_table = bitmap_create(slot_count);
   if (swap_table == NULL) {
     return;
   }
