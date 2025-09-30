@@ -1130,7 +1130,28 @@ static bool install_page(void *upage, void *kpage, bool writable) {
 /* 여기부터의 코드는 프로젝트 3 이후에 사용된다.
  * 프로젝트 2에서만 사용할 구현은 위쪽 블록에 작성하라. */
 
-static bool lazy_load_segment(struct page *page, void *aux_) {}
+/* 첫 페이지 폴트시 호출되어 세그먼트 적재하는 역할 한다 */
+static bool lazy_load_segment(struct page *page, void *aux_) {
+  struct load_aux *aux = aux_;
+  void *kva = page->frame->kva;
+
+  /* 파일에서 필요한 만큼 읽기 */
+  if (aux->read_bytes > 0) {
+    int n = file_read_at(aux->file, kva, aux->read_bytes, aux->ofs);
+    if (n != (int)aux->read_bytes) {
+      free(aux);
+      return false;
+    }
+  }
+
+  /* 남은 공간 0으로 채우기 */
+  if (aux->zero_bytes > 0) {
+    memset((uint8_t *)kva + aux->read_bytes, 0, aux->zero_bytes);
+  }
+
+  free(aux);
+  return true;
+}
 
 /* Loads a segment starting at offset OFS in FILE at address
  * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
