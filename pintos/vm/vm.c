@@ -112,16 +112,29 @@ static struct frame *vm_evict_frame(void) {
   return NULL;
 }
 
-/* palloc() and get frame. If there is no available page, evict the page
- * and return it. This always return valid address. That is, if the user pool
- * memory is full, this function evicts the frame to get the available memory
- * space.*/
+/* palloc()으로 프레임(frame)을 획득한다. 사용 가능한 페이지가 없으면,
+ * 페이지를 축출(evict)하고 반환한다. 이 함수는 항상 유효한 주소를 반환한다.
+ * 즉, 사용자 풀(user pool) 메모리가 가득 찬 경우, 이 함수는 프레임을
+ * 축출하여 사용 가능한 메모리 공간을 확보한다. */
+
 static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
   /* TODO: Fill this function. */
 
+  // 물리페이지 획득
+  void *kernal_va = palloc_get_page(PAL_USER);
+  if (kernal_va == NULL) {
+    PANIC("todo");  // 실패시
+  }
+
+  // 프레임구조체 생성 및 초기화
+  struct frame *frame = malloc(sizeof(struct frame));
+  frame->kva = kva;
+  frame->page = NULL;
+
   ASSERT(frame != NULL);
   ASSERT(frame->page == NULL);
+
   return frame;
 }
 
