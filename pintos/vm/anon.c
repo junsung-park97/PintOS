@@ -37,8 +37,6 @@ void vm_anon_init(void) {
   if (swap_table == NULL) {
     return;
   }
-
-  swap_disk = NULL;
 }
 
 /* 파일 매핑을 초기화 합니다. */
