@@ -67,13 +67,12 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
   if (spt_find_page(spt, upage) == NULL) {
     // upage가 이미 사용 중인지 확인한다.
 
-    struct page *page = malloc(sizeof(struct page));
+    struct page *page = calloc(1, sizeof(struct page));
     // 새로운 페이지 구조체를 동적으로 할당
     if (page == NULL) {
       goto err;
     }
 
-    page->writable = writable;
     page->frame = NULL;
 
     bool (*initializer)(struct page *, enum vm_type, void *);
@@ -94,6 +93,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
     uninit_new(page, upage, init, type, aux, initializer);
     // uninit_new 함수를 사용하여 페이지를 초기화한다.
+    page->writable = writable;
 
     if (!spt_insert_page(spt, page)) {
       // 페이지를 보조 페이지 테이블에 삽입한다.
