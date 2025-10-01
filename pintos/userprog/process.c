@@ -1132,6 +1132,8 @@ static bool install_page(void *upage, void *kpage, bool writable) {
 
 /* 첫 페이지 폴트시 호출되어 세그먼트 적재하는 역할 한다 */
 static bool lazy_load_segment(struct page *page, void *aux_) {
+  ASSERT(page != NULL);
+  ASSERT(page->frame != NULL);
   struct load_aux *aux = aux_;
   void *kva = page->frame->kva;
 
