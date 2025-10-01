@@ -1,4 +1,6 @@
 /* anon.c: Implementation of page for non-disk image (a.k.a. anonymous page). */
+#include "devices/anon.h"
+
 #include "devices/disk.h"
 #include "include/threads/vaddr.h"
 #include "lib/kernel/bitmap.h"
@@ -37,14 +39,17 @@ void vm_anon_init(void) {
   if (swap_table == NULL) {
     return;
   }
+
+  return true;
 }
 
-/* 파일 매핑을 초기화 합니다. */
+/* anon_page를 초기화 합니다. */
 bool anon_initializer(struct page *page, enum vm_type type, void *kva) {
   /* 핸들러를 설정합니다. */
   page->operations = &anon_ops;
+  page->anon.slot_idx = SIZE_MAX;
 
-  struct anon_page *anon_page = &page->anon;
+  return true;
 }
 
 /* Swap in the page by read contents from the swap disk. */
