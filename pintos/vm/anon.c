@@ -2,8 +2,8 @@
 #include "devices/anon.h"
 
 #include "devices/disk.h"
-#include "include/vaddr.h"
-#include "lib/bitmap.h"
+#include "include/threads/vaddr.h"
+#include "lib/kernel/bitmap.h"
 #include "vm/vm.h"
 
 /* DO NOT MODIFY BELOW LINE */
