@@ -8,61 +8,67 @@
  * function.
  * */
 
-#include "vm/vm.h"
 #include "vm/uninit.h"
 
-static bool uninit_initialize (struct page *page, void *kva);
-static void uninit_destroy (struct page *page);
+#include "vm/vm.h"
+
+static bool uninit_initialize(struct page *page, void *kva);
+static void uninit_destroy(struct page *page);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations uninit_ops = {
-	.swap_in = uninit_initialize,
-	.swap_out = NULL,
-	.destroy = uninit_destroy,
-	.type = VM_UNINIT,
+    .swap_in = uninit_initialize,
+    .swap_out = NULL,
+    .destroy = uninit_destroy,
+    .type = VM_UNINIT,
 };
 
 /* DO NOT MODIFY this function */
-void
-uninit_new (struct page *page, void *va, vm_initializer *init,
-		enum vm_type type, void *aux,
-		bool (*initializer)(struct page *, enum vm_type, void *)) {
-	ASSERT (page != NULL);
+void uninit_new(struct page *page, void *va, vm_initializer *init,
+                enum vm_type type, void *aux,
+                bool (*initializer)(struct page *, enum vm_type, void *)) {
+  ASSERT(page != NULL);
 
-	*page = (struct page) {
-		.operations = &uninit_ops,
-		.va = va,
-		.frame = NULL, /* no frame for now */
-		.uninit = (struct uninit_page) {
-			.init = init,
-			.type = type,
-			.aux = aux,
-			.page_initializer = initializer,
-		}
-	};
+  *page = (struct page){.operations = &uninit_ops,
+                        .va = va,
+                        .frame = NULL, /* no frame for now */
+                        .uninit = (struct uninit_page){
+                            .init = init,
+                            .type = type,
+                            .aux = aux,
+                            .page_initializer = initializer,
+                        }};
 }
 
 /* Initalize the page on first fault */
-static bool
-uninit_initialize (struct page *page, void *kva) {
-	struct uninit_page *uninit = &page->uninit;
+/* 변경없이 그대로 사용합니다~~~ */
+static bool uninit_initialize(struct page *page, void *kva) {
+  struct uninit_page *uninit = &page->uninit;
 
-	/* Fetch first, page_initialize may overwrite the values */
-	vm_initializer *init = uninit->init;
-	void *aux = uninit->aux;
+  /* page_initializer가 페이지의 내용을 덮어쓸 수 있으므로,
+   * 필요한 값들을 미리 지역 변수에 저장한다. */
+  vm_initializer *init = uninit->init;
+  void *aux = uninit->aux;
 
-	/* TODO: You may need to fix this function. */
-	return uninit->page_initializer (page, uninit->type, kva) &&
-		(init ? init (page, aux) : true);
+  /* 이 함수는 두 단계로 동작한다.
+   * 1. 페이지 타입 변환: uninit 페이지를 실제 타입(anon, file)으로 바꾼다.
+   *    (uninit -> page_initializer 호출)
+   * 2. 데이터 로딩: 변환된 페이지에 실제 데이터를 로드
+   *    (init 함수 포인터 호출)
+   * 두 단계가 모두 성공해야 true를 반환
+   */
+
+  /* TODO: You may need to fix this function. */
+  return uninit->page_initializer(page, uninit->type, kva) &&
+         (init ? init(page, aux) : true);
 }
 
 /* Free the resources hold by uninit_page. Although most of pages are transmuted
  * to other page objects, it is possible to have uninit pages when the process
  * exit, which are never referenced during the execution.
  * PAGE will be freed by the caller. */
-static void
-uninit_destroy (struct page *page) {
-	struct uninit_page *uninit UNUSED = &page->uninit;
-	/* TODO: Fill this function.
-	 * TODO: If you don't have anything to do, just return. */
+static void uninit_destroy(struct page *page) {
+  struct uninit_page *uninit UNUSED = &page->uninit;
+  /* TODO: Fill this function.
+   * TODO: If you don't have anything to do, just return. */
 }
