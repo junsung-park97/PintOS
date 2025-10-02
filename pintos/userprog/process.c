@@ -1237,6 +1237,16 @@ static bool setup_stack(struct intr_frame *if_) {
    * TODO: 해당 페이지가 스택임을 표시해야 한다. */
   /* TODO: Your code goes here */
   /* TODO: 여기에 코드를 작성한다. */
+  if (!vm_alloc_page_with_initializer(VM_ANON | VM_MARKER_0, stack_bottom, true,
+                                      NULL, NULL)) {
+    return success;
+  }
+  if (!vm_claim_page(stack_bottom)) {
+    return success;
+  }
+
+  if_->rsp = USER_STACK;
+  success = true;
 
   return success;
 }
