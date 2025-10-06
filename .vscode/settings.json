@@ -53,6 +53,7 @@
     "stdbool.h": "c",
     "mmu.h": "c",
     "hash.h": "c",
-    "vm.h": "c"
+    "vm.h": "c",
+    "disk.h": "c"
   }
 }
