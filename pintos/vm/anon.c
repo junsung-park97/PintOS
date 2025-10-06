@@ -17,6 +17,9 @@ static void anon_destroy(struct page *page);
 static struct bitmap *swap_table;
 static struct disk *swap_disk;
 
+// 비트 마스킹용 락
+struct lock swap_lock;
+
 /* DO NOT MODIFY this struct */
 static const struct page_operations anon_ops = {
     .swap_in = anon_swap_in,
@@ -24,9 +27,6 @@ static const struct page_operations anon_ops = {
     .destroy = anon_destroy,
     .type = VM_ANON,
 };
-
-// 비트 마스킹용 락
-struct lock swap_lock;
 
 /* 익명 페이지를 위한 데이터를 초기화 합니다. */
 void vm_anon_init(void) {
