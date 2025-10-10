@@ -4,6 +4,7 @@
 
 #include "threads/malloc.h"
 #include "threads/mmu.h"
+#include "userprog/process.h"
 #include "vm/inspect.h"
 
 /* 해시 테이블 */
@@ -120,6 +121,8 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED,
 /* Insert PAGE into spt with validation. */
 bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
                      struct page *page UNUSED) {
+  ASSERT(page != NULL);
+  ASSERT(page->operations != NULL);
   page->va = pg_round_down(page->va);
   struct hash_elem *old = hash_insert(&spt->h, &page->spt_elem);
   return old == NULL;
@@ -127,7 +130,6 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
   vm_dealloc_page(page);
-  return true;
 }
 
 /* Get the struct frame, that will be evicted. */
@@ -163,8 +165,8 @@ static struct frame *vm_get_frame(void) {
   }
 
   // 프레임구조체 생성 및 초기화
-  struct frame *frame = malloc(sizeof(struct frame));
-  frame->kva = kva;
+  frame = malloc(sizeof(struct frame));
+  frame->kva = kernal_va;
   frame->page = NULL;
 
   ASSERT(frame != NULL);
@@ -180,13 +182,24 @@ static void vm_stack_growth(void *addr UNUSED) {}
 static bool vm_handle_wp(struct page *page UNUSED) {}
 
 /* Return true on success */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
-                         bool user UNUSED, bool write UNUSED,
-                         bool not_present UNUSED) {
-  struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-  struct page *page = NULL;
-  /* TODO: Validate the fault */
-  /* TODO: Your code goes here */
+bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
+                         bool write, bool not_present) {
+  // 보호 위반은 skip
+  if (!not_present) return false;
+
+  // 커널 주소/NULL은 거부
+  if (addr == NULL || is_kernel_vaddr(addr)) return false;
+
+  void *upage = pg_round_down(addr);
+
+  // SPT에서 해당 페이지 찾기 (load_segment 때 등록된 uninit/file 페이지)
+  struct supplemental_page_table *spt = &thread_current()->spt;
+  struct page *page = spt_find_page(spt, upage);
+  if (page == NULL) {
+    return false;
+  }
+
+  if (write && !page->writable) return false;
 
   return vm_do_claim_page(page);
 }

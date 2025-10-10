@@ -56,16 +56,6 @@ struct dupmap_ent {
   struct hash_elem elem;
 };
 
-/* vm용 구조체 */
-#ifdef VM
-struct load_aux {
-  struct file *file;
-  off_t ofs;
-  size_t read_bytes;
-  size_t zero_bytes;
-};
-#endif
-
 /* General process initializer for initd and other process. */
 /* initd 및 기타 프로세스를 위한 일반 초기화 함수. */
 static void process_init(void) {
@@ -471,6 +461,10 @@ int process_exec(void *f_name) {
   _if.eflags = FLAG_IF | FLAG_MBS;
 
   process_cleanup();
+
+#ifdef VM
+  supplemental_page_table_init(&t->spt);
+#endif
 
   /* 커맨드라인 토큰화: prog + argv[] */
   char *save_ptr;

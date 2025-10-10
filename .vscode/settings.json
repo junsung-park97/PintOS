@@ -54,6 +54,26 @@
     "mmu.h": "c",
     "hash.h": "c",
     "vm.h": "c",
-    "disk.h": "c"
+    "atomic": "c",
+    "cmath": "c",
+    "unordered_map": "c",
+    "limits": "c",
+    "functional": "c",
+    "tuple": "c",
+    "type_traits": "c",
+    "compare": "c",
+    "deque": "c",
+    "string": "c",
+    "vector": "c",
+    "memory_resource": "c",
+    "string_view": "c",
+    "algorithm": "c",
+    "numeric": "c",
+    "ostream": "c",
+    "streambuf": "c",
+    "system_error": "c",
+    "utility": "c",
+    "types.h": "c",
+    "page_cache.h": "c"
   }
 }
