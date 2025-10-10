@@ -1199,7 +1199,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
     /* TODO: Set up aux to pass information to the lazy_load_segment. */
     /* TODO: lazy_load_segment에 정보를 전달하기 위한 aux를 설정한다. */
-    struct load_aux *aux = maloc(sizeof *aux);
+    struct load_aux *aux = malloc(sizeof *aux);
     if (!aux) return false;
     aux->file = file;
     aux->ofs = ofs;
@@ -1218,7 +1218,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
     read_bytes -= page_read_bytes;
     zero_bytes -= page_zero_bytes;
     upage += PGSIZE;
-    ofs += page_zero_bytes;
+    ofs += page_read_bytes;
   }
   return true;
 }
