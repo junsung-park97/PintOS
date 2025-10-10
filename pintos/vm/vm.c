@@ -195,8 +195,26 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   // SPT에서 해당 페이지 찾기 (load_segment 때 등록된 uninit/file 페이지)
   struct supplemental_page_table *spt = &thread_current()->spt;
   struct page *page = spt_find_page(spt, upage);
+
   if (page == NULL) {
-    return false;
+    // void *rsp_stack = user ? f->rsp : thread_current()->rsp;
+    void *rsp_stack =
+        is_kernel_vaddr(f->rsp) ? thread_current()->user_rsp : f->rsp;
+    // 둘 중 뭐가 맞을까?
+
+    if (addr >= USER_STACK || addr < rsp_stack - 8) {
+      return false;
+    }
+
+    if (addr < USER_STACK - (1 << 20)) {  // 1MB 리미트
+      return false;
+    }
+
+    vm_stack_growth(upage);
+    page = spt_find_page(spt, upage);
+    if (page == NULL) {
+      return false;
+    }
   }
 
   if (write && !page->writable) return false;
