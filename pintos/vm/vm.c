@@ -268,7 +268,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
       void *parent_aux = parent_page->uninit.aux;
       void *child_aux = NULL;
 
-      if (parent_aux) {
+      if (type == VM_FILE && parent_aux) {
         child_aux = malloc(sizeof(struct load_aux));
         if (child_aux == NULL) {
           supplemental_page_table_kill(dst);
@@ -289,7 +289,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
       if (!vm_alloc_page_with_initializer(type, upage, writable, init,
                                           child_aux)) {
         if (child_aux) {
-          file_close(((struct load_aux *)child_aux)->file);
+          if (type == VM_FILE) file_close(((struct load_aux *)child_aux)->file);
           free(child_aux);
         }
         supplemental_page_table_kill(dst);
