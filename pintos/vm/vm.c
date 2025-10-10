@@ -50,6 +50,7 @@ enum vm_type page_get_type(struct page *page) {
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+void spt_destructor(struct hash_elem *e, void *aux);
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -247,10 +248,89 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
 
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-                                  struct supplemental_page_table *src UNUSED) {}
+                                  struct supplemental_page_table *src UNUSED) {
+  struct hash_iterator iterator;
+  struct page *parent_page;
+  hash_first(&iterator, &src->h);
+  while (hash_next(&iterator)) {
+    parent_page = hash_entry(hash_cur(&iterator), struct page, spt_elem);
+
+    enum vm_type type = parent_page->operations->type;
+    if (type == VM_UNINIT) {
+      type = parent_page->uninit.type;
+    }
+
+    void *upage = pg_round_down(parent_page->va);
+    bool writable = parent_page->writable;
+
+    if (parent_page->operations->type == VM_UNINIT) {
+      vm_initializer *init = parent_page->uninit.init;
+      void *parent_aux = parent_page->uninit.aux;
+      void *child_aux = NULL;
+
+      if (type == VM_FILE && parent_aux) {
+        child_aux = malloc(sizeof(struct load_aux));
+        if (child_aux == NULL) {
+          supplemental_page_table_kill(dst);
+          return false;
+        }
+        memcpy(child_aux, parent_aux, sizeof(struct load_aux));
+
+        struct file *parent_file = ((struct load_aux *)parent_aux)->file;
+        struct file *child_file = file_reopen(parent_file);
+        if (child_file == NULL) {
+          free(child_aux);
+          supplemental_page_table_kill(dst);
+          return false;
+        }
+        ((struct load_aux *)child_aux)->file = child_file;
+      }
+
+      if (!vm_alloc_page_with_initializer(type, upage, writable, init,
+                                          child_aux)) {
+        if (child_aux) {
+          if (type == VM_FILE) file_close(((struct load_aux *)child_aux)->file);
+          free(child_aux);
+        }
+        supplemental_page_table_kill(dst);
+        return false;
+      }
+    } else {
+      // ANON 또는 FILE 페이지 처리
+      if (!vm_alloc_page(type, upage, writable)) {
+        supplemental_page_table_kill(dst);
+        return false;
+      }
+    }
+    // 부모 페이지가 프레임에 있다면 자식 페이지도 할당받고 내용 복사
+    if (parent_page->frame != NULL) {
+      // 자식 물리프레임 할당 및 매핑
+      if (!vm_claim_page(upage)) {
+        supplemental_page_table_kill(dst);
+        return false;
+      }
+      struct page *child_page = spt_find_page(dst, upage);
+      if (child_page) {
+        memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
+      } else {
+        supplemental_page_table_kill(dst);
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
   /* TODO: Destroy all the supplemental_page_table hold by thread and
    * TODO: writeback all the modified contents to the storage. */
+  hash_destroy(&spt->h, spt_destructor);
+}
+
+void spt_destructor(struct hash_elem *e, void *aux) {
+  // TODO: hash_elem을 struct page로 변환
+  // TODO: 페이지 정리
+  struct page *page = hash_entry(e, struct page, spt_elem);
+  vm_dealloc_page(page);
 }
