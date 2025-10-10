@@ -1,9 +1,11 @@
 /* anon.c: Implementation of page for non-disk image (a.k.a. anonymous page). */
-#include "devices/anon.h"
+#include "vm/anon.h"
 
 #include "devices/disk.h"
-#include "include/threads/vaddr.h"
 #include "lib/kernel/bitmap.h"
+#include "threads/mmu.h"
+#include "threads/synch.h"
+#include "threads/vaddr.h"
 #include "vm/vm.h"
 
 /* DO NOT MODIFY BELOW LINE */
@@ -14,6 +16,9 @@ static void anon_destroy(struct page *page);
 // 전역 변수
 static struct bitmap *swap_table;
 static struct disk *swap_disk;
+
+// 비트 마스킹용 락
+struct lock swap_lock;
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations anon_ops = {
@@ -40,7 +45,9 @@ void vm_anon_init(void) {
     return;
   }
 
-  return true;
+  // void라 리턴없고 비트맵 설정 후 락 초기화
+  bitmap_set_all(swap_table, false);
+  lock_init(&swap_lock);
 }
 
 /* anon_page를 초기화 합니다. */
@@ -64,5 +71,25 @@ static bool anon_swap_out(struct page *page) {
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void anon_destroy(struct page *page) {
-  struct anon_page *anon_page = &page->anon;
+  struct anon_page *ap = &page->anon;
+
+  /* 1) 스왑 슬롯 해제: 프레임 유무와 무관하게, 슬롯이 있으면 해제 */
+  if (ap->slot_idx != SIZE_MAX) {
+    lock_acquire(&swap_lock);
+    bitmap_reset(swap_table, ap->slot_idx);
+    lock_release(&swap_lock);
+    ap->slot_idx = SIZE_MAX;
+  }
+
+  /* 2) 프레임 반납: 매핑 해제 → 연결 해제 → 프레임 free */
+  if (page->frame != NULL) {
+    struct thread *cur = thread_current();
+    if (pml4_get_page(cur->pml4, page->va) != NULL) {
+      pml4_clear_page(cur->pml4, page->va);
+    }
+
+    page->frame->page = NULL;
+    vm_free_frame(page->frame);
+    page->frame = NULL;
+  }
 }
