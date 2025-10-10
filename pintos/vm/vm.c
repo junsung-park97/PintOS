@@ -50,6 +50,7 @@ enum vm_type page_get_type(struct page *page) {
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+void spt_destructor(struct hash_elem *e, void *aux);
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -324,4 +325,12 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
   /* TODO: Destroy all the supplemental_page_table hold by thread and
    * TODO: writeback all the modified contents to the storage. */
+  hash_destroy(&spt->h, spt_destructor);
+}
+
+void spt_destructor(struct hash_elem *e, void *aux) {
+  // TODO: hash_elem을 struct page로 변환
+  // TODO: 페이지 정리
+  struct page *page = hash_entry(e, struct page, spt_elem);
+  vm_dealloc_page(page);
 }
