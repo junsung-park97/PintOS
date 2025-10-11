@@ -502,9 +502,17 @@ static inline void *ensure_user_kva(const void *u, bool write) {
   }
 
   /* 3) USER_STACK 기준 1MiB 이내면 새로 만들고 claim (스택 성장) */
-  uintptr_t ua = (uintptr_t)pg;
-  if (ua >= (uintptr_t)USER_STACK - (uintptr_t)STACK_LIMIT &&
-      ua < (uintptr_t)USER_STACK) {
+  uintptr_t ua = (uintptr_t)u;
+  uintptr_t upg_a = (uintptr_t)pg;
+  uintptr_t rsp = (uintptr_t)t->user_rsp;
+
+  bool in_stack_window =
+      upg_a >= (uintptr_t)USER_STACK - (uintptr_t)STACK_LIMIT &&
+      upg_a < (uintptr_t)USER_STACK;
+
+  bool near_rsp = (ua + 8) >= (rsp - 64) && ua < (uintptr_t)USER_STACK;
+
+  if (write && in_stack_window && near_rsp) {
     if (!vm_alloc_page(VM_ANON | VM_MARKER_0, pg, true)) system_exit(-1);
     if (!vm_claim_page(pg)) system_exit(-1);
     kva = pml4_get_page(t->pml4, pg);
