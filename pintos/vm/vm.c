@@ -7,6 +7,8 @@
 #include "userprog/process.h"
 #include "vm/inspect.h"
 
+#define STACK_LIMIT (1 << 20)
+
 /* 해시 테이블 */
 static uint64_t spt_hash(const struct hash_elem *e, void *aux) {
   const struct page *p = hash_entry(e, struct page, spt_elem);
@@ -176,7 +178,21 @@ static struct frame *vm_get_frame(void) {
 }
 
 /* Growing the stack. */
-static void vm_stack_growth(void *addr UNUSED) {}
+static void vm_stack_growth(void *addr) {
+  void *page_addr = pg_round_down(addr);
+
+  if (USER_STACK - page_addr > STACK_LIMIT) {
+    return;
+  }
+
+  if (vm_alloc_page(VM_ANON, page_addr, true) == false) {
+    return;
+  }
+
+  if (!vm_claim_page(page_addr) == false) {
+    return;
+  }
+}
 
 /* Handle the fault on write_protected page */
 static bool vm_handle_wp(struct page *page UNUSED) {}
