@@ -197,10 +197,12 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
   struct page *page = spt_find_page(spt, upage);
 
   if (page == NULL) {
-    // void *rsp_stack = user ? f->rsp : thread_current()->rsp;
-    void *rsp_stack =
-        is_kernel_vaddr(f->rsp) ? thread_current()->user_rsp : f->rsp;
-    // 둘 중 뭐가 맞을까?
+    void *rsp_stack = user ? f->rsp : thread_current()->user_rsp;
+    if (rsp_stack == NULL) {
+      return false;
+    }
+    // void *rsp_stack =
+    //     is_kernel_vaddr(f->rsp) ? thread_current()->user_rsp : f->rsp;
 
     if (addr >= USER_STACK || addr < rsp_stack - 8) {
       return false;
