@@ -179,19 +179,19 @@ static struct frame *vm_get_frame(void) {
 
 /* Growing the stack. */
 static void vm_stack_growth(void *addr) {
-  void *page_addr = pg_round_down(addr);
+  // int page_addr = pg_round_down(addr);
 
-  if (USER_STACK - page_addr > STACK_LIMIT) {
+  // if (USER_STACK - page_addr > STACK_LIMIT) {
+  //   return;
+  // }
+
+  if (vm_alloc_page(VM_ANON, addr, true) == false) {
     return;
   }
 
-  if (vm_alloc_page(VM_ANON, page_addr, true) == false) {
-    return;
-  }
-
-  if (vm_claim_page(page_addr) == false) {
-    return;
-  }
+  // if (vm_claim_page(page_addr) == false) {
+  //   return;
+  // }
 }
 
 /* Handle the fault on write_protected page */

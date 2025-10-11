@@ -483,6 +483,10 @@ static inline void *ensure_user_kva(const void *u, bool write) {
     kva = pml4_get_page(thread_current()->pml4, pg);
     if (kva == NULL) system_exit(-1);
   }
+  struct page *page = spt_find_page(&thread_current()->spt, pg);
+  if (page == NULL) system_exit(-1);
+  if (write && !page->writable) system_exit(-1);
+
   return kva;
 }
 
