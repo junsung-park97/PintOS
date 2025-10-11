@@ -45,6 +45,10 @@ void syscall_handler(struct intr_frame *);
 #define STDIN_FD ((struct file *)-1)
 #define STDOUT_FD ((struct file *)-2)
 
+#ifdef VM
+#define STACK_LIMIT (1u << 20) /* 1 MiB */
+#endif
+
 /* 프로토 타입 */
 static void system_halt(void) NO_RETURN;
 
@@ -473,21 +477,44 @@ static void assert_user_range(const void *uaddr, size_t size) {
 
 /* 페이지 가능 여부 체크 후 그래도 안되면 걍 exit */
 static inline void *ensure_user_kva(const void *u, bool write) {
+  struct thread *t = thread_current();
   if (!is_user_vaddr(u)) system_exit(-1);
 
   void *pg = pg_round_down(u);
-  void *kva = pml4_get_page(thread_current()->pml4, pg);
-  if (kva == NULL) {
-    /* lazy load / stack growth 등을 여기서 처리 */
-    if (!vm_claim_page(pg)) system_exit(-1);
-    kva = pml4_get_page(thread_current()->pml4, pg);
-    if (kva == NULL) system_exit(-1);
-  }
-  struct page *page = spt_find_page(&thread_current()->spt, pg);
-  if (page == NULL) system_exit(-1);
-  if (write && !page->writable) system_exit(-1);
 
-  return kva;
+  /* 1) 이미 매핑돼 있으면 그대로 사용 */
+  void *kva = pml4_get_page(t->pml4, pg);
+  if (kva != NULL) {
+    struct page *p = spt_find_page(&t->spt, pg);
+    if (p == NULL) system_exit(-1);
+    if (write && !p->writable) system_exit(-1);
+    return kva;
+  }
+
+  /* 2) SPT에 등록된 페이지면 claim해서 매핑 */
+  struct page *p = spt_find_page(&t->spt, pg);
+  if (p != NULL) {
+    if (write && !p->writable) system_exit(-1);
+    if (!vm_claim_page(pg)) system_exit(-1);
+    kva = pml4_get_page(t->pml4, pg);
+    if (kva == NULL) system_exit(-1);
+    return kva;
+  }
+
+  /* 3) USER_STACK 기준 1MiB 이내면 새로 만들고 claim (스택 성장) */
+  uintptr_t ua = (uintptr_t)pg;
+  if (ua >= (uintptr_t)USER_STACK - (uintptr_t)STACK_LIMIT &&
+      ua < (uintptr_t)USER_STACK) {
+    if (!vm_alloc_page(VM_ANON | VM_MARKER_0, pg, true)) system_exit(-1);
+    if (!vm_claim_page(pg)) system_exit(-1);
+    kva = pml4_get_page(t->pml4, pg);
+    if (kva == NULL) system_exit(-1);
+    return kva;
+  }
+
+  /* 그것도 아니면 잘못된 접근 */
+  system_exit(-1);
+  __builtin_unreachable();
 }
 
 static bool copy_in_string(char *kdst, const char *usrc, size_t max_len) {
