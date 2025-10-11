@@ -21,6 +21,7 @@
 #include "threads/vaddr.h"  // is_user_vaddr()
 #include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/vm.h"
 
 struct lock filesys_lock;
 
@@ -80,6 +81,8 @@ static unsigned file_ref_hash(const struct hash_elem *e, void *aux);
 static bool file_ref_less(const struct hash_elem *a, const struct hash_elem *b,
                           void *aux);
 static struct file_ref *ref_find(struct file *fp);
+
+static inline void *ensure_user_kva(const void *u, bool write);
 
 // dup2
 struct file_ref {
@@ -468,6 +471,21 @@ static void assert_user_range(const void *uaddr, size_t size) {
   }
 }
 
+/* 페이지 가능 여부 체크 후 그래도 안되면 걍 exit */
+static inline void *ensure_user_kva(const void *u, bool write) {
+  if (!is_user_vaddr(u)) system_exit(-1);
+
+  void *pg = pg_round_down(u);
+  void *kva = pml4_get_page(thread_current()->pml4, pg);
+  if (kva == NULL) {
+    /* lazy load / stack growth 등을 여기서 처리 */
+    if (!vm_claim_page(pg)) system_exit(-1);
+    kva = pml4_get_page(thread_current()->pml4, pg);
+    if (kva == NULL) system_exit(-1);
+  }
+  return kva;
+}
+
 static bool copy_in_string(char *kdst, const char *usrc, size_t max_len) {
   if (usrc == NULL) system_exit(-1);
 
@@ -475,12 +493,9 @@ static bool copy_in_string(char *kdst, const char *usrc, size_t max_len) {
   while (i < max_len) {
     const uint8_t *u = (const uint8_t *)usrc + i;
 
-    if (!is_user_vaddr(u)) system_exit(-1);
+    uint8_t *kbase = ensure_user_kva(u, false);
 
-    void *kp = pml4_get_page(thread_current()->pml4, pg_round_down(u));
-    if (kp == NULL) system_exit(-1);
-
-    char c = *(((char *)kp) + pg_ofs(u));  // base + ofs 로 1바이트 읽기
+    char c = *(((char *)kbase) + pg_ofs(u));  // base + ofs 로 1바이트 읽기
     kdst[i++] = c;
     if (c == '\0') return true;  // 정상 종료: 제한 내에서 NUL 발견
   }
@@ -494,17 +509,12 @@ static void copy_in(void *kdst, const void *usrc, size_t n) {
   const uint8_t *u = (const uint8_t *)usrc;
 
   while (n > 0) {
-    if (!is_user_vaddr(u)) system_exit(-1);
-
-    const void *kp = pml4_get_page(thread_current()->pml4, pg_round_down(u));
-    if (kp == NULL) system_exit(-1);
-
-    const uint8_t *ksrc = (const uint8_t *)kp + pg_ofs(u);
+    uint8_t *kbase = ensure_user_kva(u, false);
 
     size_t chunk = PGSIZE - pg_ofs(u);
     if (chunk > n) chunk = n;
 
-    memcpy(kd, ksrc, chunk);
+    memcpy(kd, kbase + pg_ofs(u), chunk);
     kd += chunk;
     u += chunk;
     n -= chunk;
@@ -516,17 +526,12 @@ static void copy_out(void *udst, const void *ksrc, size_t n) {
   const uint8_t *k = (const uint8_t *)ksrc;
 
   while (n > 0) {
-    if (!is_user_vaddr(u)) system_exit(-1);
-
-    void *kp = pml4_get_page(thread_current()->pml4, pg_round_down(u));
-    if (kp == NULL) system_exit(-1);
-
-    uint8_t *kdst = (uint8_t *)kp + pg_ofs(u);
+    uint8_t *kbase = ensure_user_kva(u, true);
 
     size_t chunk = PGSIZE - pg_ofs(u);
     if (chunk > n) chunk = n;
 
-    memcpy(kdst, k, chunk);
+    memcpy(kbase + pg_ofs(u), k, chunk);
     u += chunk;
     k += chunk;
     n -= chunk;
