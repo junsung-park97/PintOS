@@ -498,6 +498,7 @@ int process_exec(void *f_name) {
   }
 
   uintptr_t top = (uintptr_t)_if.rsp;
+  thread_current()->user_rsp = _if.rsp;  // vm_try_handle_fault를 위해 있음
 
   size_t str_bytes = 0;
   for (int i = 0; i < argc; ++i) str_bytes += strlen(argv_k[i]) + 1;
