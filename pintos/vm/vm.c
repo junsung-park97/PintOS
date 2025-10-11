@@ -189,7 +189,7 @@ static void vm_stack_growth(void *addr) {
     return;
   }
 
-  if (!vm_claim_page(page_addr) == false) {
+  if (vm_claim_page(page_addr) == false) {
     return;
   }
 }
