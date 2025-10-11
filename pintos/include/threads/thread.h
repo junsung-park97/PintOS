@@ -24,28 +24,27 @@ enum thread_status {
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
 #define PRI_MIN 0      /* Lowest priority. */
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
 
-
 /* 자식 상태 */
 struct child_status {
   tid_t tid;
-  int exit_code;            // 자식 종료 코드
-  bool exited;              // 종료 여부
-  bool waited;              // 부모의 wait() 호출 여부
-  int ref_cnt;               // parent + child = 2 로 시작, 소유 카운트, 동기화용
-  struct semaphore sema;    // parent가 wait()에서 대기, 부모 wait일시 down, 자식 exit시 up
-  struct semaphore load_sema; // load 완료 표시 부모에게
-  bool load_done;             // load 한번만
-  bool load_ok;               // load완료 확인
-  struct list_elem elem;      // parent->children 에 매달림, 부모의 children list 용
+  int exit_code;  // 자식 종료 코드
+  bool exited;    // 종료 여부
+  bool waited;    // 부모의 wait() 호출 여부
+  int ref_cnt;    // parent + child = 2 로 시작, 소유 카운트, 동기화용
+  struct semaphore
+      sema;  // parent가 wait()에서 대기, 부모 wait일시 down, 자식 exit시 up
+  struct semaphore load_sema;  // load 완료 표시 부모에게
+  bool load_done;              // load 한번만
+  bool load_ok;                // load완료 확인
+  struct list_elem elem;  // parent->children 에 매달림, 부모의 children list 용
 };
-
 
 /* A kernel thread or user process.
  *
@@ -106,7 +105,7 @@ struct child_status {
  * blocked state is on a semaphore wait list. */
 struct thread {
   /* Owned by thread.c. */
-  tid_t tid;                 /* Thread identifier. */
+  tid_t tid; /* Thread identifier. */
 
   struct list children;            // struct child_status 노드들의 리스트
   struct child_status *my_status;  // 내가 종료시 업데이트할 내 노드
@@ -131,17 +130,19 @@ struct thread {
   fixed_t recent_cpu; /* 최근 CPU 사용량 (fixed-point)*/
 
   int exit_status;  /* 상태 */
-  bool proc_inited;  /* init 한번만 하려고 */
+  bool proc_inited; /* init 한번만 하려고 */
 
   /* 시스템 콜 */
   struct lock filesys_lock;
 
-  struct file **fd_table;    // 파일 포인터 배열
-  int fd_cap;                // 한계
-  bool fd_table_from_palloc; // exec 누수 관리용
+  struct file **fd_table;     // 파일 포인터 배열
+  int fd_cap;                 // 한계
+  bool fd_table_from_palloc;  // exec 누수 관리용
 
-  struct file *exec_file;   // exec 파일 관리용
-  
+  struct file *exec_file;  // exec 파일 관리용
+
+  void *user_rsp;  // 내가 못찾은걸까? // vm_try_handle_fault를 위해 있음
+
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint64_t *pml4; /* Page map level 4 */
@@ -196,7 +197,8 @@ struct list *get_sleep_list(void);
 
 void thread_update_all_priority(void);
 void mlfqs_update_priority(struct thread *t);
-bool thread_priority_less(const struct list_elem *, const struct list_elem *, void *);
+bool thread_priority_less(const struct list_elem *, const struct list_elem *,
+                          void *);
 bool is_not_idle(struct thread *);
 int max_priority_mlfqs_queue(void);
 

@@ -143,6 +143,7 @@ void syscall_init(void) {
 /* 주요 시스템 콜 인터페이스 */
 /* 개쩌는 가시성 (아님) */
 void syscall_handler(struct intr_frame *f) {
+  thread_current()->user_rsp = f->rsp;  // vm_try_handle_fault를 위해 있음
   switch (SC_NO(f)) {
     case SYS_HALT:
       system_halt();
