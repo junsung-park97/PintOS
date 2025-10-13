@@ -63,4 +63,17 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
               off_t offset) {}
 
 /* Do the munmap */
-void do_munmap(void *addr) {}
+void do_munmap(void *addr) {
+  while (1) {
+    struct thread *cur = thread_current();
+    struct page *page = spt_find_page(&cur->spt, addr);
+
+    if (page == NULL) return;
+
+    struct load_aux *aux = (struct load_aux *)page->uninit.aux;
+    page->file.aux = aux;
+
+    file_backed_destroy(page);
+    addr += PGSIZE;
+  }
+}
