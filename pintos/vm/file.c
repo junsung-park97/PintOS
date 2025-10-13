@@ -84,14 +84,14 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   if (length <= 0) return NULL;
   if (file == NULL) return NULL;
 
-  // 파일 객체 복사
-  struct file *mmap_file = file_reopen(file);
-  if (mmap_file == NULL) return NULL;
+  // // 파일 객체 복사
+  // struct file *mmap_file = file_reopen(file);
+  // if (mmap_file == NULL) return NULL;
 
   // 파일 객체의 byte 길이
-  off_t file_len = file_length(mmap_file);
+  off_t file_len = file_length(file);
   if (file_len == 0) {
-    file_close(mmap_file);
+    // file_close(mmap_file);
     return NULL;
   }
 
@@ -104,7 +104,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     struct file_page *aux = malloc(sizeof *aux);
     if (!aux) {
       do_munmap(upage);
-      file_close(mmap_file);
+      file_close(aux->file);
       return NULL;
     };
 
@@ -113,7 +113,13 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     size_t file_zero_byte = pg_round_up(file_read_byte) - file_read_byte;
 
     // aux 초기화
-    aux->file = mmap_file;
+    // aux->file = mmap_file;
+    aux->file = file_reopen(file);
+    if (aux->file == NULL) {
+      free(aux);
+      do_munmap(upage);
+      return NULL;
+    }
     aux->offset = offset + (PGSIZE * i);
     aux->read_bytes = file_read_byte;
     aux->zero_bytes = file_zero_byte;
@@ -121,9 +127,10 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     // 페이지 할당
     if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable,
                                         lazy_load_mmap, aux)) {
+      file_close(aux->file);
       free(aux);
       do_munmap(upage);
-      file_close(mmap_file);
+      // file_close(mmap_file);
       return NULL;
     }
 
@@ -138,7 +145,12 @@ static bool lazy_load_mmap(struct page *page, void *aux_) {
   ASSERT(page != NULL);
   ASSERT(page->frame != NULL);
 
+  // struct file_page *file_page = &page->file;
+  // void *kva = page->frame->kva;
   struct file_page *file_page = &page->file;
+  struct file_page *init = aux_;
+  *file_page = *init;
+  free(init);
   void *kva = page->frame->kva;
 
   /* 파일에서 필요한 만큼 읽기 */
@@ -170,6 +182,7 @@ void do_munmap(void *addr) {
     // page->file.aux = aux;
 
     file_backed_destroy(page);
+    spt_remove_page(&cur->spt, page);
     addr += PGSIZE;
   }
 }
