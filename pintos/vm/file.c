@@ -75,7 +75,8 @@ static void file_backed_destroy(struct page *page) {
 /* Do the mmap */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
               off_t offset) {
-  bool sucess = false;
+  struct thread *cur = thread_current();
+  void *base = addr;
   void *upage = addr;
 
   // 유휴성 검증
@@ -98,19 +99,31 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   // 할당되야하는 페이지 수
   size_t page_count = (length + (PGSIZE - 1)) / PGSIZE;
 
+  // [추가] 겹침 사전 검사: 대상 범위에 뭐라도 있으면 실패
+  for (size_t i = 0; i < page_count; i++) {
+    if (spt_find_page(&cur->spt, upage) != NULL) return NULL;
+    upage += PGSIZE;
+  }
+  upage = addr;
+
+  // 페이지별 할당
+  size_t remain = length;
+  off_t ofs = offset;
+
   // 할당해야 하는 페이지 수 만큼 반복
   for (int i = 0; i < page_count; i++) {
     // aux 생성
     struct file_page *aux = malloc(sizeof *aux);
     if (!aux) {
       do_munmap(upage);
-      file_close(aux->file);
       return NULL;
     };
 
-    // 페이지별 read_byte 계산
-    size_t file_read_byte = length < file_len ? length : file_len;
-    size_t file_zero_byte = pg_round_up(file_read_byte) - file_read_byte;
+    // [수정] 페이지 단위로 읽을 양 계산 (≤ PGSIZE)
+    size_t step = remain < PGSIZE ? remain : PGSIZE;
+    size_t file_left = ofs < file_len ? (size_t)(file_len - ofs) : 0;
+    size_t file_read_byte = file_left < step ? file_left : step;
+    size_t file_zero_byte = PGSIZE - file_read_byte;
 
     // aux 초기화
     // aux->file = mmap_file;
@@ -120,7 +133,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
       do_munmap(upage);
       return NULL;
     }
-    aux->offset = offset + (PGSIZE * i);
+    aux->offset = ofs;
     aux->read_bytes = file_read_byte;
     aux->zero_bytes = file_zero_byte;
 
@@ -134,11 +147,13 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
       return NULL;
     }
 
-    length -= file_read_byte;
+    // 다음 페이지로
+    remain -= step;         // 매핑 길이는 PGSIZE 기준으로 소모
+    ofs += file_read_byte;  // 파일 오프셋은 실제 읽은 만큼만 전진
     upage += PGSIZE;
   }
 
-  return upage;
+  return base;
 }
 
 static bool lazy_load_mmap(struct page *page, void *aux_) {
@@ -181,8 +196,10 @@ void do_munmap(void *addr) {
     // struct load_aux *aux = (struct load_aux *)page->uninit.aux;
     // page->file.aux = aux;
 
+    hash_delete(&cur->spt.h, &page->spt_elem);
     file_backed_destroy(page);
-    spt_remove_page(&cur->spt, page);
+    vm_dealloc_page(page);
+
     addr += PGSIZE;
   }
 }
