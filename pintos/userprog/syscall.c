@@ -73,6 +73,8 @@ static unsigned system_tell(int fd);
 
 static int system_dup2(int oldfd, int newfd);
 
+static void system_munmap(void *addr);
+
 /* 시스템콜 헬퍼 */
 static struct file *fd_get(int fd);
 static void assert_user_range(const void *uaddr, size_t size);
@@ -203,6 +205,10 @@ void syscall_handler(struct intr_frame *f) {
     /* dup2 extra 과제 */
     case SYS_DUP2:
       RET(f, system_dup2((int)ARG0(f), (int)ARG1(f)));
+      break;
+
+    case SYS_MUNMAP:
+      system_munmap((void *)ARG0(f));
       break;
 
     default:
@@ -677,4 +683,20 @@ static struct file_ref *ref_find(struct file *fp) {
   key.fp = fp;
   struct hash_elem *e = hash_find(&file_ref_ht, &key.elem);
   return e ? hash_entry(e, struct file_ref, elem) : NULL;
+}
+
+static void system_munmap(void *addr) {
+  if (pg_ofs(addr) != 0) return;
+  // 페이지 경계 여부 확인(4096바이트 단위가 아닐 경우 즉시 반환)
+
+  if (addr == NULL || is_kernel_vaddr(addr)) return;
+
+  struct page *page = spt_find_page(&thread_current()->spt, addr);
+  if (page == NULL) return;
+  // 페이지가 없으면 매핑되지 않은 주소이기 때문에 종료
+
+  if (page_get_type(page) != VM_FILE) return;
+  // 다른 타입이면 종료
+
+  do_munmap(addr);
 }
