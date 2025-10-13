@@ -30,25 +30,12 @@ void vm_file_init(void) {
 
 /* Initialize the file backed page */
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
-  /* 1) 페이지 핸들러를 파일 전용으로 바꿔준다. */
   page->operations = &file_ops;
-
-  /* 2) do_mmap()이 vm_alloc_page_with_initializer()의 aux로 넘겨준
-        struct file_page를 꺼내 page->file에 복사한다. */
-  struct file_page *source = (struct file_page *)page->uninit.aux;
-
-  if (source == NULL) {
-    /* aux 없이 호출되면 초기화할 정보가 없으므로 실패 처리 */
-    return false;
-  }
-
-  page->file = *source; /* file, offset, read_bytes, zero_bytes 모두 복사 */
-  page->uninit.aux = NULL;
-  free(source); /* aux는 더 이상 필요 없음 */
-
-  /* 주의: dst->file 은 do_mmap() 쪽에서 이미 file_reopen()으로
-     독립 핸들을 만들어 넘겨주는 것이 가장 안전(페이지별 close 가능) */
-
+  // exec 경로 안전을 위해 기본값 초기화만 (mmap은 lazy_load_mmap에서 채움)
+  page->file.file = NULL;
+  page->file.offset = 0;
+  page->file.read_bytes = 0;
+  page->file.zero_bytes = 0;
   return true;
 }
 /* Swap in the page by read contents from the file. */
@@ -66,18 +53,19 @@ static void file_backed_destroy(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
   struct thread *cur = thread_current();
 
-  if (page->frame == NULL) return;
-
-  if (pml4_is_dirty(cur->pml4, page->va)) {
-    // 페이지가 수정, 기록되었는지(dirty) 확인
-    // filesys_lock_acquire();
-    // 락 해야하나?
-    file_write_at(file_page->file, page->frame->kva, file_page->read_bytes,
-                  file_page->offset);
-    // 변경된 내용을 파일의 올바른 위치(offset)에 다시 쓰는 로직
-    pml4_set_dirty(cur->pml4, page->va, 0);
-    // 내용을 파일에 작성한 후 dirty bit를 0으로 변경
-    // filesys_lock_release();  // 락 해야하나?
+  // mmap 페이지로 초기화된 경우에만 write-back
+  if (page->frame && file_page->file != NULL) {
+    if (pml4_is_dirty(cur->pml4, page->va)) {
+      // 페이지가 수정, 기록되었는지(dirty) 확인
+      // filesys_lock_acquire();
+      // 락 해야하나?
+      file_write_at(file_page->file, page->frame->kva, file_page->read_bytes,
+                    file_page->offset);
+      // 변경된 내용을 파일의 올바른 위치(offset)에 다시 쓰는 로직
+      pml4_set_dirty(cur->pml4, page->va, 0);
+      // 내용을 파일에 작성한 후 dirty bit를 0으로 변경
+      // filesys_lock_release();  // 락 해야하나?
+    }
   }
 
   pml4_clear_page(cur->pml4, page->va);
