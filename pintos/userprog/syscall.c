@@ -72,6 +72,8 @@ static void system_seek(int fd, unsigned position);
 static unsigned system_tell(int fd);
 
 static int system_dup2(int oldfd, int newfd);
+void *system_mmap(void *addr, size_t length, int writable, int fd,
+                  off_t offset);
 
 static void system_munmap(void *addr);
 
@@ -205,6 +207,11 @@ void syscall_handler(struct intr_frame *f) {
     /* dup2 extra 과제 */
     case SYS_DUP2:
       RET(f, system_dup2((int)ARG0(f), (int)ARG1(f)));
+      break;
+    /* vm 과제 */
+    case SYS_MMAP:
+      RET(f, system_mmap((void *)ARG0(f), (size_t)ARG1(f), (int)ARG2(f),
+                         (int)ARG3(f), (off_t)ARG4(f)));
       break;
 
     case SYS_MUNMAP:
@@ -456,6 +463,28 @@ static int system_dup2(int oldfd, int newfd) {
 
   t->fd_table[newfd] = oldf;
   return newfd;
+}
+
+void *system_mmap(void *addr, size_t length,
+│ int writable, int fd, off_t offset) {
+  // 유효성 검사
+  if (addr == NULL) return NULL;
+  if (!is_user_vaddr(addr)) return NULL;
+  if (pg_ofs(addr) != 0) return NULL;
+  if (length <= 0) return NULL;
+  if (pg_ofs(offset) == 0) return NULL;
+  if (offset < 0) return NULL;
+
+  // fd검사
+  if (fd < 0 || fd == 0 || fd == 1) {
+    return NULL;
+  }
+
+  // fd -> file 변환
+  struct file *file = fd_get(fd);
+  if (file == NULL) return NULL;
+
+  return do_mmap(addr, length, writable, file, offset);
 }
 
 // fd 뽑아보기

@@ -92,7 +92,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   if (length <= 0) return NULL;
   if (file == NULL) return NULL;
 
-  // 파일 객체 생성
+  // 파일 객체 복사
   struct file *mmap_file = file_reopen(file);
   if (mmap_file == NULL) return NULL;
 
