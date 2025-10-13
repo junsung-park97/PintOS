@@ -42,6 +42,24 @@ static bool file_backed_swap_out(struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
+  struct thread *cur = thread_current();
+
+  if (page->frame == NULL) return;
+
+  if (pml4_is_dirty(cur->pml4, page->va)) {
+    // 페이지가 수정, 기록되었는지(dirty) 확인
+    // filesys_lock_acquire();
+    // 락 해야하나?
+    file_write_at(file_page->file, page->frame->kva, file_page->read_bytes,
+                  file_page->offset);
+    // 변경된 내용을 파일의 올바른 위치(offset)에 다시 쓰는 로직
+    pml4_set_dirty(cur->pml4, page->va, 0);
+    // 내용을 파일에 작성한 후 dirty bit를 0으로 변경
+    // filesys_lock_release();  // 락 해야하나?
+  }
+
+  pml4_clear_page(cur->pml4, page->va);
+  // 페이지 테이블에서 해당 가상 주소 매핑을 제거
 }
 
 /* Do the mmap */
@@ -109,4 +127,17 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
 static bool lazy_load_mmap(struct page *page, void *aux_) {}
 
 /* Do the munmap */
-void do_munmap(void *addr) {}
+void do_munmap(void *addr) {
+  while (1) {
+    struct thread *cur = thread_current();
+    struct page *page = spt_find_page(&cur->spt, addr);
+
+    if (page == NULL) return;
+
+    struct load_aux *aux = (struct load_aux *)page->uninit.aux;
+    page->file.aux = aux;
+
+    file_backed_destroy(page);
+    addr += PGSIZE;
+  }
+}
