@@ -19,16 +19,34 @@ static const struct page_operations file_ops = {
 };
 
 /* The initializer of file vm */
-void vm_file_init(void) {}
+void vm_file_init(void) {
+  /* 아직 준비할 건 없음
+   * 필요 시 락/리스트 등을 여기서 초기화 */
+}
 
 /* Initialize the file backed page */
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
-  /* Set up the handler */
+  /* 1) 페이지 핸들러를 파일 전용으로 바꿔준다. */
   page->operations = &file_ops;
 
-  struct file_page *file_page = &page->file;
-}
+  /* 2) do_mmap()이 vm_alloc_page_with_initializer()의 aux로 넘겨준
+        struct file_page를 꺼내 page->file에 복사한다. */
+  struct file_page *source = (struct file_page *)page->uninit.aux;
 
+  if (source == NULL) {
+    /* aux 없이 호출되면 초기화할 정보가 없으므로 실패 처리 */
+    return false;
+  }
+
+  page->file = *source; /* file, offset, read_bytes, zero_bytes 모두 복사 */
+  page->uninit.aux = NULL;
+  free(source); /* aux는 더 이상 필요 없음 */
+
+  /* 주의: dst->file 은 do_mmap() 쪽에서 이미 file_reopen()으로
+     독립 핸들을 만들어 넘겨주는 것이 가장 안전(페이지별 close 가능) */
+
+  return true;
+}
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
   struct file_page *file_page UNUSED = &page->file;
@@ -42,6 +60,24 @@ static bool file_backed_swap_out(struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
+  struct thread *cur = thread_current();
+
+  if (page->frame == NULL) return;
+
+  if (pml4_is_dirty(cur->pml4, page->va)) {
+    // 페이지가 수정, 기록되었는지(dirty) 확인
+    // filesys_lock_acquire();
+    // 락 해야하나?
+    file_write_at(file_page->file, page->frame->kva, file_page->read_bytes,
+                  file_page->offset);
+    // 변경된 내용을 파일의 올바른 위치(offset)에 다시 쓰는 로직
+    pml4_set_dirty(cur->pml4, page->va, 0);
+    // 내용을 파일에 작성한 후 dirty bit를 0으로 변경
+    // filesys_lock_release();  // 락 해야하나?
+  }
+
+  pml4_clear_page(cur->pml4, page->va);
+  // 페이지 테이블에서 해당 가상 주소 매핑을 제거
 }
 
 /* Do the mmap */
@@ -109,4 +145,17 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
 static bool lazy_load_mmap(struct page *page, void *aux_) {}
 
 /* Do the munmap */
-void do_munmap(void *addr) {}
+void do_munmap(void *addr) {
+  while (1) {
+    struct thread *cur = thread_current();
+    struct page *page = spt_find_page(&cur->spt, addr);
+
+    if (page == NULL) return;
+
+    struct load_aux *aux = (struct load_aux *)page->uninit.aux;
+    page->file.aux = aux;
+
+    file_backed_destroy(page);
+    addr += PGSIZE;
+  }
+}
