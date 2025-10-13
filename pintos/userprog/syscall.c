@@ -465,8 +465,8 @@ static int system_dup2(int oldfd, int newfd) {
   return newfd;
 }
 
-void *system_mmap(void *addr, size_t length,
-│ int writable, int fd, off_t offset) {
+void *system_mmap(void *addr, size_t length, int writable, int fd,
+                  off_t offset) {
   // 유효성 검사
   if (addr == NULL) return NULL;
   if (!is_user_vaddr(addr)) return NULL;
