@@ -2,7 +2,11 @@
 
 #include "filesys/file.h"
 
+#include <string.h>
+
+#include "threads/mmu.h"
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 #include "vm/vm.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
@@ -130,7 +134,29 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   return upage;
 }
 
-static bool lazy_load_mmap(struct page *page, void *aux_) {}
+static bool lazy_load_mmap(struct page *page, void *aux_) {
+  ASSERT(page != NULL);
+  ASSERT(page->frame != NULL);
+
+  struct file_page *file_page = &page->file;
+  void *kva = page->frame->kva;
+
+  /* 파일에서 필요한 만큼 읽기 */
+  if (file_page->read_bytes > 0) {
+    int n = file_read_at(file_page->file, kva, file_page->read_bytes,
+                         file_page->offset);
+    if (n != (int)file_page->read_bytes) {
+      return false;
+    }
+  }
+
+  /* 남은 공간 0으로 채우기 */
+  if (file_page->zero_bytes > 0) {
+    memset((uint8_t *)kva + file_page->read_bytes, 0, file_page->zero_bytes);
+  }
+
+  return true;
+}
 
 /* Do the munmap */
 void do_munmap(void *addr) {
