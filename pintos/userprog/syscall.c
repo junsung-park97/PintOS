@@ -72,8 +72,8 @@ static void system_seek(int fd, unsigned position);
 static unsigned system_tell(int fd);
 
 static int system_dup2(int oldfd, int newfd);
-void *system_mmap(void *addr, size_t length, int writable, int fd,
-                  off_t offset);
+static void *system_mmap(void *addr, size_t length, int writable, int fd,
+                         off_t offset);
 
 static void system_munmap(void *addr);
 
@@ -465,14 +465,15 @@ static int system_dup2(int oldfd, int newfd) {
   return newfd;
 }
 
-void *system_mmap(void *addr, size_t length,
-│ int writable, int fd, off_t offset) {
+void *system_mmap(void *addr, size_t length, int writable, int fd,
+                  off_t offset) {
   // 유효성 검사
   if (addr == NULL) return NULL;
   if (!is_user_vaddr(addr)) return NULL;
   if (pg_ofs(addr) != 0) return NULL;
   if (length <= 0) return NULL;
-  if (pg_ofs(offset) == 0) return NULL;
+  // if (pg_ofs(offset) == 0) return NULL; 은 오타
+  if (pg_ofs(offset) != 0) return NULL;
   if (offset < 0) return NULL;
 
   // fd검사
