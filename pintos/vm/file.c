@@ -1,10 +1,14 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 
+#include "filesys/file.h"
+
+#include "threads/vaddr.h"
 #include "vm/vm.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
+static bool lazy_load_mmap(struct page *page, void *aux_);
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -56,11 +60,102 @@ static bool file_backed_swap_out(struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
+  struct thread *cur = thread_current();
+
+  if (page->frame == NULL) return;
+
+  if (pml4_is_dirty(cur->pml4, page->va)) {
+    // 페이지가 수정, 기록되었는지(dirty) 확인
+    // filesys_lock_acquire();
+    // 락 해야하나?
+    file_write_at(file_page->file, page->frame->kva, file_page->read_bytes,
+                  file_page->offset);
+    // 변경된 내용을 파일의 올바른 위치(offset)에 다시 쓰는 로직
+    pml4_set_dirty(cur->pml4, page->va, 0);
+    // 내용을 파일에 작성한 후 dirty bit를 0으로 변경
+    // filesys_lock_release();  // 락 해야하나?
+  }
+
+  pml4_clear_page(cur->pml4, page->va);
+  // 페이지 테이블에서 해당 가상 주소 매핑을 제거
 }
 
 /* Do the mmap */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
-              off_t offset) {}
+              off_t offset) {
+  bool sucess = false;
+  void *upage = addr;
+
+  // 유휴성 검증
+  if (pg_ofs(upage) != 0) return NULL;
+  if (pg_ofs(offset) != 0) return NULL;
+  if (length <= 0) return NULL;
+  if (file == NULL) return NULL;
+
+  // 파일 객체 생성
+  struct file *mmap_file = file_reopen(file);
+  if (mmap_file == NULL) return NULL;
+
+  // 파일 객체의 byte 길이
+  off_t file_len = file_length(mmap_file);
+  if (file_len == 0) {
+    file_close(mmap_file);
+    return NULL;
+  }
+
+  // 할당되야하는 페이지 수
+  size_t page_count = (length + (PGSIZE - 1)) / PGSIZE;
+
+  // 할당해야 하는 페이지 수 만큼 반복
+  for (int i = 0; i < page_count; i++) {
+    // aux 생성
+    struct file_page *aux = malloc(sizeof *aux);
+    if (!aux) {
+      do_munmap(upage);
+      file_close(mmap_file);
+      return NULL;
+    };
+
+    // 페이지별 read_byte 계산
+    size_t file_read_byte = length < file_len ? length : file_len;
+    size_t file_zero_byte = pg_round_up(file_read_byte) - file_read_byte;
+
+    // aux 초기화
+    aux->file = mmap_file;
+    aux->ofs = offset + (PGSIZE * i);
+    aux->read_bytes = file_read_byte;
+    aux->zero_bytes = file_zero_byte;
+
+    // 페이지 할당
+    if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable,
+                                        lazy_load_mmap, aux)) {
+      free(aux);
+      do_munmap(upage);
+      file_close(mmap_file);
+      return NULL;
+    }
+
+    length -= file_read_byte;
+    upage += PGSIZE;
+  }
+
+  return upage;
+}
+
+static bool lazy_load_mmap(struct page *page, void *aux_) {}
 
 /* Do the munmap */
-void do_munmap(void *addr) {}
+void do_munmap(void *addr) {
+  while (1) {
+    struct thread *cur = thread_current();
+    struct page *page = spt_find_page(&cur->spt, addr);
+
+    if (page == NULL) return;
+
+    struct load_aux *aux = (struct load_aux *)page->uninit.aux;
+    page->file.aux = aux;
+
+    file_backed_destroy(page);
+    addr += PGSIZE;
+  }
+}
