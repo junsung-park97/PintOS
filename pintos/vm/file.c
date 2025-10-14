@@ -80,6 +80,10 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   void *upage = addr;
 
   // 유휴성 검증
+  if (upage == NULL) return NULL;
+  if (!is_user_vaddr(upage)) return NULL;
+  if (pg_ofs(upage) != 0) return NULL;
+
   if (pg_ofs(upage) != 0) return NULL;
   if (pg_ofs(offset) != 0) return NULL;
   if (length <= 0) return NULL;
@@ -101,6 +105,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
 
   // [추가] 겹침 사전 검사: 대상 범위에 뭐라도 있으면 실패
   for (size_t i = 0; i < page_count; i++) {
+    if (!is_user_vaddr(upage)) return NULL;
     if (spt_find_page(&cur->spt, upage) != NULL) return NULL;
     upage += PGSIZE;
   }
