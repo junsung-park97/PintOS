@@ -14,6 +14,8 @@ static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 static bool lazy_load_mmap(struct page *page, void *aux_);
 
+extern struct lock filesys_lock;
+
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
     .swap_in = file_backed_swap_in,
@@ -38,14 +40,50 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
   page->file.zero_bytes = 0;
   return true;
 }
+
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
   struct file_page *file_page UNUSED = &page->file;
+  off_t n;
+
+  lock_acquire(&filesys_lock);
+  n = file_read_at(file_page->file, kva, file_page->read_bytes,
+                   file_page->offset);
+  lock_release(&filesys_lock);
+
+  if (n != (off_t)file_page->read_bytes) return false;
+
+  if (file_page->read_bytes < PGSIZE) {
+    memset((uint8_t *)kva + file_page->read_bytes, 0,
+           PGSIZE - file_page->read_bytes);
+  }
+
+  return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
+  struct frame *frame = page->frame;
+
+  // 소유자 pml4 필요 page->owner, page->pml4
+  struct thread *owner = page->owner;
+  bool dirty = pml4_is_dirty(owner->pml4, page->va);
+
+  void *kva = frame->kva;
+
+  if (dirty) {
+    off_t written;
+    lock_acquire(&filesys_lock);
+    written = file_write_at(file_page->file, kva, file_page->read_bytes,
+                            file_page->offset);
+    lock_release(&filesys_lock);
+
+    if (written != (off_t)file_page->read_bytes) return false;
+    pml4_set_dirty(owner->pml4, page->va, false);
+  }
+
+  return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
