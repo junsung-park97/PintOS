@@ -52,7 +52,7 @@ struct page {
 struct frame {
   void *kva;
   struct page *page;
-  struct list_elem elme;
+  struct list_elem elem;
 };
 
 /* The function table for page operations.
@@ -101,3 +101,4 @@ bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
 
 #endif /* VM_VM_H */
+
