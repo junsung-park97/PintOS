@@ -9,6 +9,9 @@
 
 #define STACK_LIMIT (1 << 20)
 
+static struct list frame_table;
+static struct lock frame_lock;
+
 /* 해시 테이블 */
 static uint64_t spt_hash(const struct hash_elem *e, void *aux) {
   const struct page *p = hash_entry(e, struct page, spt_elem);
@@ -34,6 +37,8 @@ void vm_init(void) {
   register_inspect_intr();
   /* DO NOT MODIFY UPPER LINES. */
   /* TODO: Your code goes here. */
+  list_init(&frame_table);
+  lock_init(&frame_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -136,10 +141,12 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
 
 /* Get the struct frame, that will be evicted. */
 static struct frame *vm_get_victim(void) {
-  struct frame *victim = NULL;
+  // struct frame *victim = NULL;
   /* TODO: The policy for eviction is up to you. */
-
-  return victim;
+  ASSERT(!list_empty(&frame_table));
+  struct list_elem *e = list_pop_front(&frame_table);
+  // return victim;
+  return list_entry(e, struct frame, elem);
 }
 
 /* Evict one page and return the corresponding frame.
@@ -147,8 +154,18 @@ static struct frame *vm_get_victim(void) {
 static struct frame *vm_evict_frame(void) {
   struct frame *victim UNUSED = vm_get_victim();
   /* TODO: swap out the victim and return the evicted frame. */
+  if (victim == NULL) return NULL;
+  struct page *page = victim->page;
+  ASSERT(page != NULL);
 
-  return NULL;
+  if (!swap_out(page)) {
+    list_push_back(&frame_table, &victim->elem);
+    return NULL;
+  }
+
+  page->frame = NULL;
+  victim->page = NULL;
+  return victim;
 }
 
 /* palloc()으로 프레임(frame)을 획득한다. 사용 가능한 페이지가 없으면,
@@ -160,20 +177,26 @@ static struct frame *vm_get_frame(void) {
   struct frame *frame = NULL;
   /* TODO: Fill this function. */
 
+  lock_acquire(&frame_lock);
+
   // 물리페이지 획득
   void *kernal_va = palloc_get_page(PAL_USER);
-  if (kernal_va == NULL) {
-    PANIC("todo");  // 실패시
+  if (kernal_va != NULL) {
+    // 프레임구조체 생성 및 초기화
+    frame = malloc(sizeof(struct frame));
+    if (frame == NULL) PANIC("to do");
+    frame->kva = kernal_va;
+    frame->page = NULL;
+    list_push_back(&frame_table, &frame->elem);
+
+  } else {
+    frame = vm_evict_frame();
+    if (frame == NULL) PANIC("to do");
+    frame->page = NULL;
+    list_push_back(&frame_table, &frame->elem);
   }
 
-  // 프레임구조체 생성 및 초기화
-  frame = malloc(sizeof(struct frame));
-  frame->kva = kernal_va;
-  frame->page = NULL;
-
-  ASSERT(frame != NULL);
-  ASSERT(frame->page == NULL);
-
+  lock_release(&frame_lock);
   return frame;
 }
 
