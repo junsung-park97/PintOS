@@ -11,6 +11,8 @@
 //
 #include "vm/anon.h"
 #include "vm/file.h"
+//
+#include "list.h"
 
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
@@ -50,6 +52,7 @@ struct page {
 struct frame {
   void *kva;
   struct page *page;
+  struct list_elem elme;
 };
 
 /* The function table for page operations.
