@@ -1,9 +1,10 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 
-#include "filesys/file.h"
+#include "vm/file.h"
 
 #include <string.h>
 
+#include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
@@ -38,24 +39,27 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
   page->file.offset = 0;
   page->file.read_bytes = 0;
   page->file.zero_bytes = 0;
+  page->file.owns_file = false;
   return true;
 }
 
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva) {
   struct file_page *file_page UNUSED = &page->file;
-  off_t n;
 
-  lock_acquire(&filesys_lock);
-  n = file_read_at(file_page->file, kva, file_page->read_bytes,
-                   file_page->offset);
-  lock_release(&filesys_lock);
+  if (file_page->read_bytes > 0) {
+    if (file_page->file == NULL) return false;
+    lock_acquire(&filesys_lock);
+    off_t n = file_read_at(file_page->file, kva, file_page->read_bytes,
+                           file_page->offset);
+    lock_release(&filesys_lock);
+    if (n != (off_t)file_page->read_bytes) {
+      return false;
+    }
+  }
 
-  if (n != (off_t)file_page->read_bytes) return false;
-
-  if (file_page->read_bytes < PGSIZE) {
-    memset((uint8_t *)kva + file_page->read_bytes, 0,
-           PGSIZE - file_page->read_bytes);
+  if (file_page->zero_bytes > 0) {
+    memset((uint8_t *)kva + file_page->read_bytes, 0, file_page->zero_bytes);
   }
 
   return true;
@@ -65,49 +69,57 @@ static bool file_backed_swap_in(struct page *page, void *kva) {
 static bool file_backed_swap_out(struct page *page) {
   struct file_page *file_page UNUSED = &page->file;
   struct frame *frame = page->frame;
-
-  // 소유자 pml4 필요 page->owner, page->pml4
   struct thread *owner = page->owner;
+  if (!frame || !owner) return true;
+
   bool dirty = pml4_is_dirty(owner->pml4, page->va);
-
-  void *kva = frame->kva;
-
-  if (dirty) {
-    off_t written;
+  if (dirty && file_page->file) {
     lock_acquire(&filesys_lock);
-    written = file_write_at(file_page->file, kva, file_page->read_bytes,
-                            file_page->offset);
+    off_t written = file_write_at(file_page->file, frame->kva,
+                                  file_page->read_bytes, file_page->offset);
     lock_release(&filesys_lock);
-
     if (written != (off_t)file_page->read_bytes) return false;
     pml4_set_dirty(owner->pml4, page->va, false);
   }
 
+  /* 매핑 제거는 vm_evict_frame()이 일괄 처리 */
   return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page) {
-  struct file_page *file_page UNUSED = &page->file;
-  struct thread *cur = thread_current();
+  struct file_page *file_page = &page->file;
+  struct frame *frame = page->frame;
+  struct thread *owner = page->owner;
+  uint64_t *pml4 = owner ? owner->pml4 : NULL;
 
-  // mmap 페이지로 초기화된 경우에만 write-back
-  if (page->frame && file_page->file != NULL) {
-    if (pml4_is_dirty(cur->pml4, page->va)) {
-      // 페이지가 수정, 기록되었는지(dirty) 확인
-      // filesys_lock_acquire();
-      // 락 해야하나?
-      file_write_at(file_page->file, page->frame->kva, file_page->read_bytes,
-                    file_page->offset);
-      // 변경된 내용을 파일의 올바른 위치(offset)에 다시 쓰는 로직
-      pml4_set_dirty(cur->pml4, page->va, 0);
-      // 내용을 파일에 작성한 후 dirty bit를 0으로 변경
-      // filesys_lock_release();  // 락 해야하나?
+  if (frame != NULL) {
+    if (file_page->file != NULL && pml4 != NULL &&
+        pml4_is_dirty(pml4, page->va) && file_page->read_bytes > 0) {
+      lock_acquire(&filesys_lock);
+      off_t written = file_write_at(file_page->file, frame->kva,
+                                    file_page->read_bytes, file_page->offset);
+      lock_release(&filesys_lock);
+      if (written == (off_t)file_page->read_bytes) {
+        pml4_set_dirty(pml4, page->va, false);
+      }
     }
+
+    if (pml4 != NULL) {
+      pml4_clear_page(pml4, page->va);
+    }
+    frame->page = NULL;
+    page->frame = NULL;
+    vm_free_frame(frame);
+  } else if (pml4 != NULL) {
+    pml4_clear_page(pml4, page->va);
   }
 
-  pml4_clear_page(cur->pml4, page->va);
-  // 페이지 테이블에서 해당 가상 주소 매핑을 제거
+  if (file_page->owns_file && file_page->file != NULL) {
+    file_close(file_page->file);
+  }
+  file_page->file = NULL;
+  file_page->owns_file = false;
 }
 
 /* Do the mmap */
@@ -127,14 +139,9 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   if (length <= 0) return NULL;
   if (file == NULL) return NULL;
 
-  // // 파일 객체 복사
-  // struct file *mmap_file = file_reopen(file);
-  // if (mmap_file == NULL) return NULL;
-
   // 파일 객체의 byte 길이
   off_t file_len = file_length(file);
   if (file_len == 0) {
-    // file_close(mmap_file);
     return NULL;
   }
 
@@ -168,8 +175,6 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     size_t file_read_byte = file_left < step ? file_left : step;
     size_t file_zero_byte = PGSIZE - file_read_byte;
 
-    // aux 초기화
-    // aux->file = mmap_file;
     aux->file = file_reopen(file);
     if (aux->file == NULL) {
       free(aux);
@@ -179,6 +184,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     aux->offset = ofs;
     aux->read_bytes = file_read_byte;
     aux->zero_bytes = file_zero_byte;
+    aux->owns_file = true;
 
     // 페이지 할당
     if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable,
@@ -186,7 +192,6 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
       file_close(aux->file);
       free(aux);
       do_munmap(upage);
-      // file_close(mmap_file);
       return NULL;
     }
 
@@ -240,7 +245,7 @@ void do_munmap(void *addr) {
     // page->file.aux = aux;
 
     hash_delete(&cur->spt.h, &page->spt_elem);
-    file_backed_destroy(page);
+    // file_backed_destroy(page);
     vm_dealloc_page(page);
 
     addr += PGSIZE;

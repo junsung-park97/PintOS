@@ -74,6 +74,8 @@
     "system_error": "c",
     "utility": "c",
     "types.h": "c",
-    "page_cache.h": "c"
+    "page_cache.h": "c",
+    "inspect.h": "c",
+    "*.inc": "c"
   }
 }

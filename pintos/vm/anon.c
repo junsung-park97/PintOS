@@ -19,6 +19,7 @@ static struct disk *swap_disk;
 
 // 비트 마스킹용 락
 struct lock swap_lock;
+static const size_t SECTORS_PER_SLOT = PGSIZE / DISK_SECTOR_SIZE;
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations anon_ops = {
@@ -61,54 +62,48 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva) {
 /* Swap in the page by read contents from the swap disk. */
 static bool anon_swap_in(struct page *page, void *kva) {
   struct anon_page *anon_page = &page->anon;
+  size_t slot = anon_page->slot_idx;
 
-  // 슬롯 인덱스 확인
-  if (anon_page->slot_idx == SIZE_MAX) {
-    return true;
-  }
-  // 디스크에서 메모리로 읽기
-  for (int i = 0; i < 8; i++) {
-    disk_read(swap_disk, anon_page->slot_idx * 8 + i,
-              kva + i * DISK_SECTOR_SIZE);
-  }
-  // 스왑 슬롯 해제
+  if (slot == SIZE_MAX) return false;
+  if (swap_disk == NULL) return false;
+
   lock_acquire(&swap_lock);
-  bitmap_set(swap_table, anon_page->slot_idx, false);
-  lock_release(&swap_lock);
-  // 슬롯 인덱스 초기화
+  for (size_t i = 0; i < SECTORS_PER_SLOT; i++) {
+    disk_read(swap_disk, slot * SECTORS_PER_SLOT + i,
+              (uint8_t *)kva + DISK_SECTOR_SIZE * i);
+  }
+  bitmap_reset(swap_table, slot);
   anon_page->slot_idx = SIZE_MAX;
+  lock_release(&swap_lock);
   return true;
 }
 
 /* Swap out the page by writing contents to the swap disk. */
 static bool anon_swap_out(struct page *page) {
-  struct anon_page *anon_page = &page->anon;
-  struct thread *cur = thread_current();
+  struct anon_page *anon = &page->anon;
+  struct frame *frame = page->frame;
+  if (frame == NULL) return false;
+  if (swap_disk == NULL) return false;
 
-  // 비어있는 스왑 슬롯 찾기
   lock_acquire(&swap_lock);
-  size_t slot_idx = bitmap_scan(swap_table, 0, 1, false);
-  if (slot_idx == BITMAP_ERROR) {
-    lock_release(&swap_lock);
-    return false;
+  size_t slot = anon->slot_idx;
+  if (slot == SIZE_MAX) {
+    slot = bitmap_scan_and_flip(swap_table, 0, 1, false);
+    if (slot == BITMAP_ERROR) {
+      lock_release(&swap_lock);
+      return false;
+    }
+    anon->slot_idx = slot;
   }
-  bitmap_set(swap_table, slot_idx, true);
+
+  for (size_t i = 0; i < SECTORS_PER_SLOT; i++) {
+    disk_write(swap_disk, slot * SECTORS_PER_SLOT + i,
+               (uint8_t *)frame->kva + DISK_SECTOR_SIZE * i);
+  }
   lock_release(&swap_lock);
-
-  // 데이터를 스왑 디스크에 쓰기
-  for (int i = 0; i < 8; i++) {
-    disk_write(swap_disk, slot_idx * 8 + i,
-               page->frame->kva + i * DISK_SECTOR_SIZE);
-  }
-
-  // 슬롯 인덱스 번호 저장
-  anon_page->slot_idx = slot_idx;
-
-  // 페이지 테이블 매핑 해체
-  pml4_clear_page(cur->pml4, page->va);
-
   return true;
 }
+
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void anon_destroy(struct page *page) {
   struct anon_page *ap = &page->anon;
@@ -122,14 +117,14 @@ static void anon_destroy(struct page *page) {
   }
 
   /* 2) 프레임 반납: 매핑 해제 → 연결 해제 → 프레임 free */
-  if (page->frame != NULL) {
-    struct thread *cur = thread_current();
-    if (pml4_get_page(cur->pml4, page->va) != NULL) {
-      pml4_clear_page(cur->pml4, page->va);
+  struct frame *frame = page->frame;
+  if (frame != NULL) {
+    struct thread *owner = page->owner;
+    if (owner && owner->pml4) {
+      pml4_clear_page(owner->pml4, page->va);
     }
-
-    page->frame->page = NULL;
-    vm_free_frame(page->frame);
+    frame->page = NULL;
     page->frame = NULL;
+    vm_free_frame(frame);
   }
 }
