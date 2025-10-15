@@ -449,8 +449,10 @@ int process_exec(void *f_name) {
 
   /* 기존 exec_file이 있다면 정리 (exec 체인 대비) */
   if (t->exec_file) {
+    lock_acquire(&filesys_lock);
     file_allow_write(t->exec_file);
     file_close(t->exec_file);
+    lock_release(&filesys_lock);
     t->exec_file = NULL;
   }
 
@@ -652,8 +654,10 @@ void process_exit(void) {
   }
 
   if (cur->exec_file) {
+    lock_acquire(&filesys_lock);
     file_allow_write(cur->exec_file);
     file_close(cur->exec_file);
+    lock_release(&filesys_lock);
     cur->exec_file = NULL;
   }
 
@@ -841,7 +845,9 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
   /* Open executable file. */
   /* 실행 파일을 연다. */
+  lock_acquire(&filesys_lock);
   file = filesys_open(file_name);
+  lock_release(&filesys_lock);
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;
@@ -849,8 +855,11 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 
   /* Read and verify executable header. */
   /* 실행 파일 헤더를 읽고 검증한다. */
-  if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
-      memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
+  lock_acquire(&filesys_lock);
+  off_t hdr_read = file_read(file, &ehdr, sizeof ehdr);
+  lock_release(&filesys_lock);
+  if (hdr_read != (off_t)sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) ||
+      ehdr.e_type != 2 ||
       ehdr.e_machine != 0x3E  // amd64
       /* amd64 아키텍처 */
       || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) ||
@@ -865,10 +874,18 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   for (i = 0; i < ehdr.e_phnum; i++) {
     struct Phdr phdr;
 
-    if (file_ofs < 0 || file_ofs > file_length(file)) goto done;
+    lock_acquire(&filesys_lock);
+    off_t flen = file_length(file);
+    lock_release(&filesys_lock);
+    if (file_ofs < 0 || file_ofs > flen) goto done;
+    lock_acquire(&filesys_lock);
     file_seek(file, file_ofs);
+    lock_release(&filesys_lock);
 
-    if (file_read(file, &phdr, sizeof phdr) != sizeof phdr) goto done;
+    lock_acquire(&filesys_lock);
+    off_t phr_read = file_read(file, &phdr, sizeof phdr);
+    lock_release(&filesys_lock);
+    if (phr_read != (off_t)sizeof phdr) goto done;
     file_ofs += sizeof phdr;
     switch (phdr.p_type) {
       case PT_NULL:
@@ -928,7 +945,9 @@ static bool load(const char *file_name, struct intr_frame *if_) {
   /* TODO: 여기에 코드를 작성한다.
    * TODO: 인자 전달을 구현하라 (project2/argument_passing.html 참고). */
   t->exec_file = file;
+  lock_acquire(&filesys_lock);
   file_deny_write(file);
+  lock_release(&filesys_lock);
   file = NULL;
 
   success = true;
@@ -936,7 +955,11 @@ static bool load(const char *file_name, struct intr_frame *if_) {
 done:
   /* We arrive here whether the load is successful or not. */
   /* 성공 여부와 관계없이 이 지점으로 온다. */
-  if (file) file_close(file);
+  if (file) {
+    lock_acquire(&filesys_lock);
+    file_close(file);
+    lock_release(&filesys_lock);
+  }
   return success;
 }
 
@@ -951,7 +974,10 @@ static bool validate_segment(const struct Phdr *phdr, struct file *file) {
 
   /* p_offset must point within FILE. */
   /* p_offset은 FILE의 범위 안을 가리켜야 한다. */
-  if (phdr->p_offset > (uint64_t)file_length(file)) return false;
+  lock_acquire(&filesys_lock);
+  off_t flen = file_length(file);
+  lock_release(&filesys_lock);
+  if (phdr->p_offset > (uint64_t)flen) return false;
 
   /* p_memsz must be at least as big as p_filesz. */
   /* p_memsz는 p_filesz보다 크거나 같아야 한다. */
@@ -1035,7 +1061,9 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
   ASSERT(pg_ofs(upage) == 0);
   ASSERT(ofs % PGSIZE == 0);
 
+  lock_acquire(&filesys_lock);
   file_seek(file, ofs);
+  lock_release(&filesys_lock);
   while (read_bytes > 0 || zero_bytes > 0) {
     /* Do calculate how to fill this page.
      * We will read PAGE_READ_BYTES bytes from FILE
@@ -1053,9 +1081,14 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
     /* Load this page. */
     /* 이 페이지에 내용을 적재한다. */
-    if (file_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
-      palloc_free_page(kpage);
-      return false;
+    if (page_read_bytes > 0) {
+      lock_acquire(&filesys_lock);
+      off_t got = file_read(file, kpage, page_read_bytes);
+      lock_release(&filesys_lock);
+      if (got != (off_t)page_read_bytes) {
+        palloc_free_page(kpage);
+        return false;
+      }
     }
     memset(kpage + page_read_bytes, 0, page_zero_bytes);
 

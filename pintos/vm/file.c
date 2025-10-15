@@ -116,7 +116,9 @@ static void file_backed_destroy(struct page *page) {
   }
 
   if (file_page->owns_file && file_page->file != NULL) {
+    lock_acquire(&filesys_lock);
     file_close(file_page->file);
+    lock_release(&filesys_lock);
   }
   file_page->file = NULL;
   file_page->owns_file = false;
@@ -140,7 +142,9 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
   if (file == NULL) return NULL;
 
   // 파일 객체의 byte 길이
+  lock_acquire(&filesys_lock);
   off_t file_len = file_length(file);
+  lock_release(&filesys_lock);
   if (file_len == 0) {
     return NULL;
   }
@@ -175,7 +179,9 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     size_t file_read_byte = file_left < step ? file_left : step;
     size_t file_zero_byte = PGSIZE - file_read_byte;
 
+    lock_acquire(&filesys_lock);
     aux->file = file_reopen(file);
+    lock_release(&filesys_lock);
     if (aux->file == NULL) {
       free(aux);
       do_munmap(upage);
@@ -189,7 +195,9 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     // 페이지 할당
     if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable,
                                         lazy_load_mmap, aux)) {
+      lock_acquire(&filesys_lock);
       file_close(aux->file);
+      lock_release(&filesys_lock);
       free(aux);
       do_munmap(upage);
       return NULL;
@@ -218,9 +226,12 @@ static bool lazy_load_mmap(struct page *page, void *aux_) {
 
   /* 파일에서 필요한 만큼 읽기 */
   if (file_page->read_bytes > 0) {
-    int n = file_read_at(file_page->file, kva, file_page->read_bytes,
-                         file_page->offset);
-    if (n != (int)file_page->read_bytes) {
+    off_t n;
+    lock_acquire(&filesys_lock);
+    n = file_read_at(file_page->file, kva, file_page->read_bytes,
+                     file_page->offset);
+    lock_release(&filesys_lock);
+    if (n != (off_t)file_page->read_bytes) {
       return false;
     }
   }
