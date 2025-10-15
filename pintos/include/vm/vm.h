@@ -35,6 +35,7 @@ struct page {
 
   /* Your implementation */
   bool writable;  // 읽기 전용 혹은 읽기/쓰기 가능을 저장하기 위해 추가
+  struct thread *owner;
 
   /* Per-type data are binded into the union.
    * Each function automatically detects the current union */
@@ -52,7 +53,8 @@ struct page {
 struct frame {
   void *kva;
   struct page *page;
-  struct list_elem elem;
+  struct list_elem frame_elem;
+  bool in_table;
 };
 
 /* The function table for page operations.
@@ -101,4 +103,3 @@ bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
 
 #endif /* VM_VM_H */
-

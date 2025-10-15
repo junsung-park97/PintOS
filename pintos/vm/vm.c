@@ -2,6 +2,8 @@
 
 #include "vm/vm.h"
 
+#include <string.h>
+
 #include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "userprog/process.h"
@@ -9,7 +11,10 @@
 
 #define STACK_LIMIT (1 << 20)
 
+extern struct lock filesys_lock;
+
 static struct list frame_table;
+
 static struct lock frame_lock;
 
 /* 해시 테이블 */
@@ -102,6 +107,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
     uninit_new(page, upage, init, type, aux, initializer);
     // uninit_new 함수를 사용하여 페이지를 초기화한다.
+    page->owner = thread_current();
     page->writable = writable;
 
     if (!spt_insert_page(spt, page)) {
@@ -144,9 +150,17 @@ static struct frame *vm_get_victim(void) {
   // struct frame *victim = NULL;
   /* TODO: The policy for eviction is up to you. */
   ASSERT(!list_empty(&frame_table));
-  struct list_elem *e = list_pop_front(&frame_table);
-  // return victim;
-  return list_entry(e, struct frame, elem);
+  struct list_elem *e = list_begin(&frame_table);
+  while (e != list_end(&frame_table)) {
+    struct frame *cand = list_entry(e, struct frame, frame_elem);
+    e = list_next(e);
+    if (cand->page != NULL) {
+      list_remove(&cand->frame_elem);
+      cand->in_table = false;
+      return cand;
+    }
+  }
+  return NULL;
 }
 
 /* Evict one page and return the corresponding frame.
@@ -159,8 +173,13 @@ static struct frame *vm_evict_frame(void) {
   ASSERT(page != NULL);
 
   if (!swap_out(page)) {
-    list_push_back(&frame_table, &victim->elem);
+    list_push_back(&frame_table, &victim->frame_elem);
+    victim->in_table = true;
     return NULL;
+  }
+
+  if (page->owner && page->owner->pml4) {
+    pml4_clear_page(page->owner->pml4, page->va);
   }
 
   page->frame = NULL;
@@ -187,13 +206,17 @@ static struct frame *vm_get_frame(void) {
     if (frame == NULL) PANIC("to do");
     frame->kva = kernal_va;
     frame->page = NULL;
-    list_push_back(&frame_table, &frame->elem);
+    frame->in_table = false;
+    // list_push_back(&frame_table, &frame->frame_elem);
+    // frame->in_table = true;
 
   } else {
     frame = vm_evict_frame();
     if (frame == NULL) PANIC("to do");
     frame->page = NULL;
-    list_push_back(&frame_table, &frame->elem);
+    frame->in_table = false;
+    // list_push_back(&frame_table, &frame->frame_elem);
+    // frame->in_table = true;
   }
 
   lock_release(&frame_lock);
@@ -281,6 +304,12 @@ bool vm_claim_page(void *va UNUSED) {
 
 void vm_free_frame(struct frame *frame) {
   ASSERT(frame != NULL);
+  lock_acquire(&frame_lock);
+  if (frame->in_table) {
+    list_remove(&frame->frame_elem);
+    frame->in_table = false;
+  }
+  lock_release(&frame_lock);
   ASSERT(frame->page == NULL);
   palloc_free_page(frame->kva);
   free(frame);
@@ -294,23 +323,31 @@ static bool vm_do_claim_page(struct page *page) {
   frame->page = page;
   page->frame = frame;
 
+  if (page->owner == NULL) page->owner = thread_current();
+
   /* TODO: Insert page table entry to map page's VA to frame's PA. */
   struct thread *cur = thread_current();
-  if (!pml4_set_page(cur->pml4, page->va, frame->kva, page->writable)) {
-    frame->page = NULL;
-    page->frame = NULL;
-    vm_free_frame(frame);
-    return false;
-  }
+  if (!pml4_set_page(cur->pml4, page->va, frame->kva, page->writable))
+    goto fail;
 
   if (!swap_in(page, frame->kva)) {
     pml4_clear_page(cur->pml4, page->va);
-    frame->page = NULL;
-    page->frame = NULL;
-    vm_free_frame(frame);
-    return false;
+    goto fail;
   }
+
+  lock_acquire(&frame_lock);
+  if (!frame->in_table) {
+    list_push_back(&frame_table, &frame->frame_elem);
+    frame->in_table = true;
+  }
+  lock_release(&frame_lock);
+
   return true;
+fail:
+  frame->page = NULL;
+  page->frame = NULL;
+  vm_free_frame(frame);
+  return false;
 }
 
 /* Initialize new supplemental page table */
